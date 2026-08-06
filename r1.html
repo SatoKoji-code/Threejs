@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<link rel="icon" href="data:,">
+
+<title>GLB Viewer</title>
+
+<style>
+
+*{
+    box-sizing:border-box;
+}
+
+html,
+body{
+
+    width:100%;
+    height:100%;
+
+    margin:0;
+    overflow:hidden;
+
+    background:#20242a;
+
+    font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+}
+
+#viewer{
+
+    width:100%;
+    height:100%;
+
+}
+
+#viewer canvas{
+
+    display:block;
+
+    width:100%;
+    height:100%;
+
+}
+
+#status{
+
+    position:fixed;
+
+    top:16px;
+    left:16px;
+
+    z-index:100;
+
+    min-width:260px;
+
+    max-width:520px;
+
+    padding:10px 14px;
+
+    color:white;
+
+    background:rgba(0,0,0,0.72);
+
+    border-radius:6px;
+
+    line-height:1.6;
+
+    font-size:14px;
+
+    pointer-events:none;
+
+}
+
+#operation-guide{
+
+    position:fixed;
+
+    right:16px;
+    bottom:16px;
+
+    z-index:100;
+
+    padding:10px 14px;
+
+    color:white;
+
+    background:rgba(0,0,0,0.65);
+
+    border-radius:6px;
+
+    line-height:1.7;
+
+    font-size:13px;
+
+    pointer-events:none;
+
+}
+
+#model-list{
+
+    position:fixed;
+
+    top:16px;
+    right:16px;
+
+    width:320px;
+
+    max-height:45vh;
+
+    overflow:auto;
+
+    padding:12px;
+
+    background:rgba(0,0,0,0.72);
+
+    color:white;
+
+    border-radius:6px;
+
+    z-index:100;
+
+}
+
+#model-list h2{
+
+    margin:0 0 10px;
+
+    font-size:14px;
+
+}
+
+.model-row{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:8px;
+
+    padding:4px 0;
+
+}
+
+.model-name{
+
+    flex:1;
+
+    overflow-wrap:anywhere;
+
+}
+
+.model-state{
+
+    white-space:nowrap;
+
+    opacity:.8;
+
+}
+
+</style>
+
+
+<script type="importmap">
+{
+    "imports":{
+
+        "three":"./three/build/three.module.js",
+
+        "three/addons/":"./three/examples/jsm/"
+
+    }
+}
+</script>
+
+</head>
+
+<body>
+
+<div id="viewer"></div>
+
+<div id="status">
+
+GLBモデルを読み込む準備をしています…
+
+</div>
+
+<div id="model-list">
+
+<h2>モデル一覧</h2>
+
+<div id="model-list-body"></div>
+
+</div>
+
+<div id="operation-guide">
+
+左ドラッグ：回転<br>
+
+ホイール：拡大・縮小<br>
+
+右ドラッグ：平行移動
+
+</div>
+
+<script type="module">
+
+import * as THREE
+from "three";
+
+import {
+
+OrbitControls
+
+}
+from "three/addons/controls/OrbitControls.js";
+
+import {
+
+GLTFLoader
+
+}
+from "three/addons/loaders/GLTFLoader.js";
+
+
+//==================================================
+// 読み込むGLB
+//==================================================
+
+const modelPaths=[
+
+"./models/model_01.glb",
+
+"./models/model_02.glb",
+
+"./models/model_03.glb"
+
+];
+
+
+//==================================================
+// ReCap補正
+//==================================================
+
+const recapRotation={
+
+x:-Math.PI/2,
+
+y:0,
+
+z:0
+
+};
+
+
+//==================================================
+// HTML取得
+//==================================================
+
+const viewerElement=
+document.getElementById("viewer");
+
+const statusElement=
+document.getElementById("status");
+
+const modelListBody=
+document.getElementById("model-list-body");
+
+
+//==================================================
+// Scene
+//==================================================
+
+const scene=
+new THREE.Scene();
+
+scene.background=
+new THREE.Color(0x20242a);
+
+
+//==================================================
+// Model Root
+//==================================================
+
+const modelRoot=
+new THREE.Group();
+
+modelRoot.rotation.set(
+
+recapRotation.x,
+
+recapRotation.y,
+
+recapRotation.z
+
+);
+
+scene.add(modelRoot);
+
+
+//==================================================
+// Camera
+//==================================================
+
+const camera=
+new THREE.PerspectiveCamera(
+
+45,
+
+window.innerWidth/window.innerHeight,
+
+0.01,
+
+100000
+
+);
+
+camera.position.set(
+
+3,
+2,
+5
+
+);
+
+
+//==================================================
+// Renderer
+//==================================================
+
+const renderer=
+new THREE.WebGLRenderer({
+
+antialias:false,
+
+alpha:false
+
+});
+
+renderer.setPixelRatio(1);
+
+renderer.setSize(
+
+window.innerWidth,
+
+window.innerHeight
+
+);
+
+renderer.outputColorSpace=
+THREE.SRGBColorSpace;
+
+renderer.toneMapping=
+THREE.ACESFilmicToneMapping;
+
+renderer.toneMappingExposure=1.5;
+
+renderer.shadowMap.enabled=false;
+
+viewerElement.appendChild(
+
+renderer.domElement
+
+);
+//==================================================
+// WebGLエラー監視
+//==================================================
+
+renderer.domElement.addEventListener(
+
+"webglcontextlost",
+
+function(event){
+
+    event.preventDefault();
+
+    console.error(
+        "WebGLコンテキストが失われました。"
+    );
+
+    statusElement.style.display=
+    "block";
+
+    statusElement.style.background=
+    "rgba(150,0,0,0.85)";
+
+    statusElement.textContent=
+    "GPUメモリ不足またはWebGLエラーが発生しました。";
+
+}
+
+);
+
+
+renderer.domElement.addEventListener(
+
+"webglcontextrestored",
+
+function(){
+
+    console.log(
+        "WebGLコンテキストが復旧しました。"
+    );
+
+    statusElement.style.display=
+    "block";
+
+    statusElement.style.background=
+    "rgba(0,90,40,0.85)";
+
+    statusElement.textContent=
+    "WebGLコンテキストが復旧しました。";
+
+}
+
+);
+
+
+//==================================================
+// OrbitControls
+//==================================================
+
+const controls=
+new OrbitControls(
+
+camera,
+
+renderer.domElement
+
+);
+
+
+controls.enableDamping=true;
+
+controls.dampingFactor=0.12;
+
+
+// 左ドラッグ回転感度
+controls.rotateSpeed=0.25;
+
+
+// ホイール拡大縮小感度
+controls.zoomSpeed=0.8;
+
+
+// 右ドラッグ平行移動感度
+controls.panSpeed=0.6;
+
+
+controls.enablePan=true;
+
+controls.screenSpacePanning=true;
+
+
+controls.minDistance=0.01;
+
+controls.maxDistance=100000;
+
+
+//==================================================
+// Light
+//==================================================
+
+// 空側と地面側から照らすライト
+const hemisphereLight=
+new THREE.HemisphereLight(
+
+0xffffff,
+
+0x555555,
+
+2.5
+
+);
+
+scene.add(
+    hemisphereLight
+);
+
+
+// モデル全体を均一に明るくするライト
+const ambientLight=
+new THREE.AmbientLight(
+
+0xffffff,
+
+1.0
+
+);
+
+scene.add(
+    ambientLight
+);
+
+
+// カメラ方向から照らすライト
+const cameraLight=
+new THREE.DirectionalLight(
+
+0xffffff,
+
+3.0
+
+);
+
+cameraLight.position.set(
+
+0,
+
+0,
+
+1
+
+);
+
+camera.add(
+    cameraLight
+);
+
+scene.add(
+    camera
+);
+
+
+//==================================================
+// Grid
+//==================================================
+
+const gridHelper=
+new THREE.GridHelper(
+
+20,
+
+20,
+
+0x888888,
+
+0x444444
+
+);
+
+scene.add(
+    gridHelper
+);
+
+
+//==================================================
+// Axis
+//==================================================
+
+// 赤：X軸
+// 緑：Y軸
+// 青：Z軸
+
+const axesHelper=
+new THREE.AxesHelper(5);
+
+scene.add(
+    axesHelper
+);
+
+
+//==================================================
+// ファイル名取得
+//==================================================
+
+function getFileName(path){
+
+    const parts=
+    path.split("/");
+
+    return parts[
+        parts.length-1
+    ];
+
+}
+
+
+//==================================================
+// モデル一覧データ作成
+//==================================================
+
+const modelEntries=
+modelPaths.map(
+
+function(path,index){
+
+    //----------------------------------------------
+    // 行
+    //----------------------------------------------
+
+    const row=
+    document.createElement(
+        "div"
+    );
+
+    row.className=
+    "model-row";
+
+
+    //----------------------------------------------
+    // チェックボックス
+    //----------------------------------------------
+
+    const checkbox=
+    document.createElement(
+        "input"
+    );
+
+    checkbox.type=
+    "checkbox";
+
+    checkbox.checked=
+    true;
+
+    // 読み込み完了までは操作不可
+    checkbox.disabled=
+    true;
+
+
+    //----------------------------------------------
+    // ファイル名
+    //----------------------------------------------
+
+    const name=
+    document.createElement(
+        "div"
+    );
+
+    name.className=
+    "model-name";
+
+    name.textContent=
+    getFileName(path);
+
+
+    //----------------------------------------------
+    // 状態
+    //----------------------------------------------
+
+    const state=
+    document.createElement(
+        "div"
+    );
+
+    state.className=
+    "model-state";
+
+    state.textContent=
+    "待機";
+
+
+    //----------------------------------------------
+    // 一覧へ追加
+    //----------------------------------------------
+
+    row.appendChild(
+        checkbox
+    );
+
+    row.appendChild(
+        name
+    );
+
+    row.appendChild(
+        state
+    );
+
+    modelListBody.appendChild(
+        row
+    );
+
+
+    //----------------------------------------------
+    // モデル管理情報
+    //----------------------------------------------
+
+    const entry={
+
+        index:index,
+
+        path:path,
+
+        checkbox:checkbox,
+
+        name:name,
+
+        state:state,
+
+        object:null,
+
+        loaded:false,
+
+        failed:false
+
+    };
+
+
+    //----------------------------------------------
+    // 表示・非表示切り替え
+    //----------------------------------------------
+
+    checkbox.addEventListener(
+
+        "change",
+
+        function(){
+
+            if(entry.object){
+
+                entry.object.visible=
+                checkbox.checked;
+
+            }
+
+        }
+
+    );
+
+
+    return entry;
+
+}
+
+);
+
+
+//==================================================
+// GLTFLoader
+//==================================================
+
+const loader=
+new GLTFLoader();
+
+
+//==================================================
+// 読み込み管理用変数
+//==================================================
+
+let currentModelIndex=0;
+
+let loadedModelCount=0;
+
+let failedModelCount=0;
+
+
+//==================================================
+// アニメーション管理
+//==================================================
+
+const mixers=[];
+
+const clock=
+new THREE.Clock();
+//==================================================
+// 次のGLBを順番に読み込む
+//==================================================
+
+function loadNextModel(){
+
+    //----------------------------------------------
+    // 全ファイルの処理が終了した場合
+    //----------------------------------------------
+
+    if(
+        currentModelIndex>=
+        modelEntries.length
+    ){
+
+        finishLoading();
+
+        return;
+
+    }
+
+
+    //----------------------------------------------
+    // 現在読み込むモデル情報
+    //----------------------------------------------
+
+    const entry=
+    modelEntries[
+        currentModelIndex
+    ];
+
+
+    entry.state.textContent=
+    "読込中";
+
+
+    statusElement.style.display=
+    "block";
+
+    statusElement.style.background=
+    "rgba(0,0,0,0.72)";
+
+
+    statusElement.textContent=
+
+    `${currentModelIndex+1}`
+    +
+    ` / ${modelEntries.length}`
+    +
+    " を読み込んでいます……\n"
+    +
+    getFileName(
+        entry.path
+    );
+
+
+    //----------------------------------------------
+    // GLB読み込み開始
+    //----------------------------------------------
+
+    loader.load(
+
+        entry.path,
+
+
+        //------------------------------------------
+        // 読み込み成功
+        //------------------------------------------
+
+        function(gltf){
+
+            const model=
+            gltf.scene;
+
+
+            model.name=
+            getFileName(
+                entry.path
+            );
+
+
+            //--------------------------------------
+            // 管理情報を更新
+            //--------------------------------------
+
+            entry.object=
+            model;
+
+            entry.loaded=
+            true;
+
+            entry.failed=
+            false;
+
+            entry.checkbox.disabled=
+            false;
+
+            entry.checkbox.checked=
+            true;
+
+            entry.state.textContent=
+            "表示中";
+
+
+            //--------------------------------------
+            // 各メッシュの設定
+            //--------------------------------------
+
+            model.traverse(
+
+                function(object){
+
+                    if(
+                        !object.isMesh
+                    ){
+
+                        return;
+
+                    }
+
+
+                    // 大規模モデル対策
+                    object.castShadow=
+                    false;
+
+                    object.receiveShadow=
+                    false;
+
+
+                    // カメラの外にあるメッシュを
+                    // 描画対象から外す
+                    object.frustumCulled=
+                    true;
+
+                }
+
+            );
+
+
+            //--------------------------------------
+            // モデルを表示
+            //--------------------------------------
+
+            modelRoot.add(
+                model
+            );
+
+
+            modelRoot.updateMatrixWorld(
+                true
+            );
+
+
+            //--------------------------------------
+            // 最初のモデルだけ
+            // カメラ位置を自動調整
+            //--------------------------------------
+
+            if(
+                loadedModelCount===0
+            ){
+
+                fitCameraToModel(
+
+                    modelRoot,
+
+                    camera,
+
+                    controls
+
+                );
+
+            }
+
+
+            //--------------------------------------
+            // GLB内アニメーション対応
+            //--------------------------------------
+
+            if(
+
+                gltf.animations
+                &&
+
+                gltf.animations.length>0
+
+            ){
+
+                const mixer=
+                new THREE.AnimationMixer(
+                    model
+                );
+
+
+                for(
+                    const animation
+                    of gltf.animations
+                ){
+
+                    const action=
+                    mixer.clipAction(
+                        animation
+                    );
+
+                    action.play();
+
+                }
+
+
+                mixers.push(
+                    mixer
+                );
+
+            }
+
+
+            //--------------------------------------
+            // 読み込み成功数を加算
+            //--------------------------------------
+
+            loadedModelCount++;
+
+
+            console.log(
+
+                "GLB読み込み完了:",
+
+                entry.path,
+
+                model
+
+            );
+
+
+            //--------------------------------------
+            // 次のモデルへ
+            //--------------------------------------
+
+            currentModelIndex++;
+
+
+            // 一度描画処理へ制御を戻してから
+            // 次のGLBを読み込む
+            window.setTimeout(
+
+                loadNextModel,
+
+                0
+
+            );
+
+        },
+
+
+        //------------------------------------------
+        // 読み込み進捗
+        //------------------------------------------
+
+        function(event){
+
+            if(
+                event.total>0
+            ){
+
+                const percent=
+                Math.round(
+
+                    event.loaded
+                    /
+                    event.total
+                    *
+                    100
+
+                );
+
+
+                const loadedMB=
+
+                event.loaded
+                /
+                1024
+                /
+                1024;
+
+
+                const totalMB=
+
+                event.total
+                /
+                1024
+                /
+                1024;
+
+
+                //----------------------------------
+                // 一覧側の状態表示
+                //----------------------------------
+
+                entry.state.textContent=
+
+                `${percent}%`;
+
+
+                //----------------------------------
+                // 画面左上の進捗表示
+                //----------------------------------
+
+                statusElement.textContent=
+
+                `${currentModelIndex+1}`
+                +
+                ` / ${modelEntries.length}`
+                +
+                " を読み込んでいます…… "
+                +
+                `${percent}%`
+                +
+                "\n"
+                +
+                getFileName(
+                    entry.path
+                )
+                +
+                "\n"
+                +
+                `${loadedMB.toFixed(1)} MB`
+                +
+                " / "
+                +
+                `${totalMB.toFixed(1)} MB`;
+
+            }
+
+            else{
+
+                //----------------------------------
+                // ファイル容量を取得できない場合
+                //----------------------------------
+
+                const loadedMB=
+
+                event.loaded
+                /
+                1024
+                /
+                1024;
+
+
+                entry.state.textContent=
+
+                `${loadedMB.toFixed(1)} MB`;
+
+
+                statusElement.textContent=
+
+                `${currentModelIndex+1}`
+                +
+                ` / ${modelEntries.length}`
+                +
+                " を読み込んでいます……"
+                +
+                "\n"
+                +
+                getFileName(
+                    entry.path
+                )
+                +
+                "\n"
+                +
+                `${loadedMB.toFixed(1)} MB 読込済み`;
+
+            }
+
+        },
+
+
+        //------------------------------------------
+        // 読み込み失敗
+        //------------------------------------------
+
+        function(error){
+
+            console.error(
+
+                "GLB読み込み失敗:",
+
+                entry.path,
+
+                error
+
+            );
+
+
+            //--------------------------------------
+            // 管理情報を更新
+            //--------------------------------------
+
+            entry.loaded=
+            false;
+
+            entry.failed=
+            true;
+
+            entry.checkbox.checked=
+            false;
+
+            entry.checkbox.disabled=
+            true;
+
+            entry.state.textContent=
+            "失敗";
+
+
+            failedModelCount++;
+
+
+            //--------------------------------------
+            // エラー表示
+            //--------------------------------------
+
+            statusElement.style.display=
+            "block";
+
+            statusElement.style.background=
+            "rgba(150,70,0,0.85)";
+
+
+            statusElement.textContent=
+
+            getFileName(
+                entry.path
+            )
+            +
+            " の読み込みに失敗しました。"
+            +
+            "\n"
+            +
+            "次のモデルを読み込みます。";
+
+
+            //--------------------------------------
+            // 次のモデルへ
+            //--------------------------------------
+
+            currentModelIndex++;
+
+
+            window.setTimeout(
+
+                loadNextModel,
+
+                500
+
+            );
+
+        }
+
+    );
+
+}
+
+
+//==================================================
+// 全GLBの読み込み終了処理
+//==================================================
+
+function finishLoading(){
+
+    modelRoot.updateMatrixWorld(
+        true
+    );
+
+
+    //----------------------------------------------
+    // 1つ以上読み込めた場合
+    // 全モデルに合わせてカメラを再調整
+    //----------------------------------------------
+
+    if(
+        loadedModelCount>0
+    ){
+
+        fitCameraToModel(
+
+            modelRoot,
+
+            camera,
+
+            controls
+
+        );
+
+    }
+
+
+    //----------------------------------------------
+    // 全件成功
+    //----------------------------------------------
+
+    if(
+        failedModelCount===0
+    ){
+
+        statusElement.style.background=
+        "rgba(0,90,40,0.85)";
+
+
+        statusElement.textContent=
+
+        `${loadedModelCount}`
+        +
+        " 個のモデルを"
+        +
+        "すべて読み込みました。";
+
+    }
+
+
+    //----------------------------------------------
+    // 一部失敗
+    //----------------------------------------------
+
+    else{
+
+        statusElement.style.background=
+        "rgba(150,70,0,0.85)";
+
+
+        statusElement.textContent=
+
+        `読み込み完了：${loadedModelCount}個`
+        +
+        ` / 失敗：${failedModelCount}個`;
+
+    }
+
+
+    //----------------------------------------------
+    // 数秒後に状態表示を消す
+    //----------------------------------------------
+
+    window.setTimeout(
+
+        function(){
+
+            statusElement.style.display=
+            "none";
+
+        },
+
+        3000
+
+    );
+
+
+    //----------------------------------------------
+    // コンソールへ結果を表示
+    //----------------------------------------------
+
+    console.log(
+
+        "読み込み結果",
+
+        {
+
+            loaded:
+            loadedModelCount,
+
+            failed:
+            failedModelCount,
+
+            rendererInfo:
+            renderer.info
+
+        }
+
+    );
+
+}
+//==================================================
+// モデル全体に合わせてカメラを自動調整
+//==================================================
+
+function fitCameraToModel(
+
+    model,
+
+    targetCamera,
+
+    targetControls
+
+){
+
+    //----------------------------------------------
+    // 最新の変換状態を反映
+    //----------------------------------------------
+
+    model.updateMatrixWorld(
+        true
+    );
+
+
+    //----------------------------------------------
+    // モデル全体の範囲を取得
+    //----------------------------------------------
+
+    const box=
+    new THREE.Box3().setFromObject(
+        model
+    );
+
+
+    if(
+        box.isEmpty()
+    ){
+
+        console.warn(
+            "モデルの大きさを取得できませんでした。"
+        );
+
+        return;
+
+    }
+
+
+    //----------------------------------------------
+    // サイズと中心座標
+    //----------------------------------------------
+
+    const size=
+    new THREE.Vector3();
+
+    const center=
+    new THREE.Vector3();
+
+
+    box.getSize(
+        size
+    );
+
+    box.getCenter(
+        center
+    );
+
+
+    //----------------------------------------------
+    // 最大寸法
+    //----------------------------------------------
+
+    const maxSize=
+    Math.max(
+
+        size.x,
+
+        size.y,
+
+        size.z
+
+    );
+
+
+    if(
+
+        !Number.isFinite(
+            maxSize
+        )
+        ||
+
+        maxSize<=0
+
+    ){
+
+        console.warn(
+            "モデルサイズが不正です。"
+        );
+
+        return;
+
+    }
+
+
+    //----------------------------------------------
+    // カメラ距離を計算
+    //----------------------------------------------
+
+    const halfFov=
+
+    THREE.MathUtils.degToRad(
+
+        targetCamera.fov
+        *
+        0.5
+
+    );
+
+
+    let distance=
+
+    (
+        maxSize
+        *
+        0.5
+    )
+    /
+    Math.tan(
+        halfFov
+    );
+
+
+    // 少し余白を持たせる
+    distance*=1.5;
+
+
+    //----------------------------------------------
+    // カメラを見る方向
+    //----------------------------------------------
+
+    const direction=
+    new THREE.Vector3(
+
+        1,
+
+        0.7,
+
+        1
+
+    ).normalize();
+
+
+    //----------------------------------------------
+    // カメラ位置を設定
+    //----------------------------------------------
+
+    targetCamera.position.copy(
+
+        center.clone().add(
+
+            direction.multiplyScalar(
+                distance
+            )
+
+        )
+
+    );
+
+
+    //----------------------------------------------
+    // クリッピング範囲を調整
+    //----------------------------------------------
+
+    targetCamera.near=
+
+    Math.max(
+
+        maxSize
+        /
+        10000,
+
+        0.001
+
+    );
+
+
+    targetCamera.far=
+
+    Math.max(
+
+        maxSize
+        *
+        1000,
+
+        1000
+
+    );
+
+
+    targetCamera.updateProjectionMatrix();
+
+
+    //----------------------------------------------
+    // 回転中心をモデル中心へ設定
+    //----------------------------------------------
+
+    targetControls.target.copy(
+        center
+    );
+
+
+    //----------------------------------------------
+    // ズーム範囲を調整
+    //----------------------------------------------
+
+    targetControls.minDistance=
+
+    Math.max(
+
+        maxSize
+        *
+        0.01,
+
+        0.001
+
+    );
+
+
+    targetControls.maxDistance=
+
+    Math.max(
+
+        maxSize
+        *
+        100,
+
+        100
+
+    );
+
+
+    targetControls.update();
+
+
+    //----------------------------------------------
+    // グリッド位置をモデル下端へ移動
+    //----------------------------------------------
+
+    gridHelper.position.y=
+    box.min.y;
+
+
+    //----------------------------------------------
+    // グリッドサイズをモデルに合わせる
+    //----------------------------------------------
+
+    const gridSize=
+
+    Math.max(
+
+        maxSize
+        *
+        4,
+
+        10
+
+    );
+
+
+    gridHelper.scale.set(
+
+        gridSize
+        /
+        20,
+
+        gridSize
+        /
+        20,
+
+        gridSize
+        /
+        20
+
+    );
+
+}
+
+
+//==================================================
+// ウィンドウサイズ変更
+//==================================================
+
+window.addEventListener(
+
+    "resize",
+
+    function(){
+
+        const width=
+        window.innerWidth;
+
+        const height=
+        window.innerHeight;
+
+
+        //------------------------------------------
+        // カメラ更新
+        //------------------------------------------
+
+        camera.aspect=
+
+        width
+        /
+        height;
+
+
+        camera.updateProjectionMatrix();
+
+
+        //------------------------------------------
+        // レンダラー更新
+        //------------------------------------------
+
+        renderer.setSize(
+
+            width,
+
+            height
+
+        );
+
+
+        // 大規模モデル対策として1固定
+        renderer.setPixelRatio(
+            1
+        );
+
+    }
+
+);
+
+
+//==================================================
+// 描画ループ
+//==================================================
+
+function animate(){
+
+    requestAnimationFrame(
+        animate
+    );
+
+
+    //----------------------------------------------
+    // 経過時間
+    //----------------------------------------------
+
+    const deltaTime=
+    clock.getDelta();
+
+
+    //----------------------------------------------
+    // GLB内アニメーション更新
+    //----------------------------------------------
+
+    for(
+        const mixer
+        of mixers
+    ){
+
+        mixer.update(
+            deltaTime
+        );
+
+    }
+
+
+    //----------------------------------------------
+    // OrbitControls更新
+    //----------------------------------------------
+
+    controls.update();
+
+
+    //----------------------------------------------
+    // 描画
+    //----------------------------------------------
+
+    renderer.render(
+
+        scene,
+
+        camera
+
+    );
+
+}
+
+
+//==================================================
+// 起動
+//==================================================
+
+animate();
+
+loadNextModel();
+
+</script>
+
+</body>
+
+</html>
