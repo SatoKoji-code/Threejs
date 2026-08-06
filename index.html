@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>GLBモデルビューアー</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            background: #20242a;
+        }
+
+        #viewer {
+            width: 100%;
+            height: 100%;
+        }
+
+        #viewer canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #status {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 10;
+
+            padding: 10px 14px;
+
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.65);
+            border-radius: 6px;
+
+            font-size: 14px;
+            line-height: 1.5;
+
+            pointer-events: none;
+        }
+
+        #operation-guide {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            z-index: 10;
+
+            padding: 10px 14px;
+
+            color: #ffffff;
+            background: rgba(0, 0, 0, 0.65);
+            border-radius: 6px;
+
+            font-size: 13px;
+            line-height: 1.7;
+
+            pointer-events: none;
+        }
+    </style>
+
+    <!--
+        "three"という名前でインポートされた場合に、
+        フォルダ内のthree.module.jsを使用するよう指定します。
+    -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "./three/build/three.module.js",
+            "three/addons/": "./three/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+
+<body>
+    <div id="viewer"></div>
+
+    <div id="status">
+        GLBモデルを読み込んでいます……
+    </div>
+
+    <div id="operation-guide">
+        左ドラッグ：回転<br>
+        ホイール：拡大・縮小<br>
+        右ドラッグ：平行移動
+    </div>
+
+    <script type="module">
+        import * as THREE from "three";
+
+        import {
+            OrbitControls
+        } from "three/addons/controls/OrbitControls.js";
+
+        import {
+            GLTFLoader
+        } from "three/addons/loaders/GLTFLoader.js";
+
+
+        // =========================================================
+        // 基本設定
+        // =========================================================
+
+        const viewerElement = document.getElementById("viewer");
+        const statusElement = document.getElementById("status");
+
+        const scene = new THREE.Scene();
+
+        // 背景色
+        scene.background = new THREE.Color(0x20242a);
+
+
+        // =========================================================
+        // カメラ
+        // =========================================================
+
+        const camera = new THREE.PerspectiveCamera(
+            45,
+            window.innerWidth / window.innerHeight,
+            0.01,
+            10000
+        );
+
+        camera.position.set(3, 2, 5);
+
+
+        // =========================================================
+        // レンダラー
+        // =========================================================
+
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: false
+        });
+
+        renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio, 2)
+        );
+
+        renderer.setSize(
+            window.innerWidth,
+            window.innerHeight
+        );
+
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        // 色調を自然に表示
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+
+        // 影を有効化
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        viewerElement.appendChild(renderer.domElement);
+
+
+        // =========================================================
+        // カメラ操作
+        // =========================================================
+
+        const controls = new OrbitControls(
+            camera,
+            renderer.domElement
+        );
+
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+
+        controls.enablePan = true;
+        controls.screenSpacePanning = true;
+
+        controls.minDistance = 0.01;
+        controls.maxDistance = 10000;
+
+
+        // =========================================================
+        // ライト
+        // =========================================================
+
+        // 全体を柔らかく照らすライト
+        const ambientLight = new THREE.HemisphereLight(
+            0xffffff,
+            0x444444,
+            2.0
+        );
+
+        scene.add(ambientLight);
+
+
+        // メインライト
+        const directionalLight = new THREE.DirectionalLight(
+            0xffffff,
+            3.0
+        );
+
+        directionalLight.position.set(5, 10, 7);
+
+        directionalLight.castShadow = true;
+
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+
+        scene.add(directionalLight);
+
+
+        // 反対側からの補助ライト
+        const fillLight = new THREE.DirectionalLight(
+            0xffffff,
+            1.2
+        );
+
+        fillLight.position.set(-5, 3, -5);
+
+        scene.add(fillLight);
+
+
+        // =========================================================
+        // グリッド
+        // =========================================================
+
+        const gridHelper = new THREE.GridHelper(
+            20,
+            20,
+            0x888888,
+            0x444444
+        );
+
+        gridHelper.visible = true;
+        scene.add(gridHelper);
+
+
+        // =========================================================
+        // GLBモデル読み込み
+        // =========================================================
+
+        const loader = new GLTFLoader();
+
+        let loadedModel = null;
+        let animationMixer = null;
+
+        const clock = new THREE.Clock();
+
+        /*
+            表示するGLBファイル。
+
+            modelsフォルダ内にmodel.glbという名前で
+            保存してください。
+        */
+        const modelPath = "./models/model.glb";
+
+
+        loader.load(
+            modelPath,
+
+            // 読み込み成功
+            function (gltf) {
+                loadedModel = gltf.scene;
+
+                scene.add(loadedModel);
+
+                // モデル内のメッシュに影を設定
+                loadedModel.traverse(function (object) {
+                    if (object.isMesh) {
+                        object.castShadow = true;
+                        object.receiveShadow = true;
+                    }
+                });
+
+
+                // モデルに合わせてカメラ位置を自動調整
+                fitCameraToModel(
+                    loadedModel,
+                    camera,
+                    controls
+                );
+
+
+                // GLBにアニメーションがあれば再生
+                if (
+                    gltf.animations &&
+                    gltf.animations.length > 0
+                ) {
+                    animationMixer =
+                        new THREE.AnimationMixer(loadedModel);
+
+                    for (const animation of gltf.animations) {
+                        const action =
+                            animationMixer.clipAction(animation);
+
+                        action.play();
+                    }
+                }
+
+
+                statusElement.textContent =
+                    "モデルの読み込みが完了しました。";
+
+                window.setTimeout(function () {
+                    statusElement.style.display = "none";
+                }, 2000);
+            },
+
+            // 読み込み進捗
+            function (event) {
+                if (event.total > 0) {
+                    const percent =
+                        Math.round(
+                            (event.loaded / event.total) * 100
+                        );
+
+                    statusElement.textContent =
+                        `GLBモデルを読み込んでいます…… ${percent}%`;
+                }
+            },
+
+            // 読み込み失敗
+            function (error) {
+                console.error(
+                    "GLBモデルの読み込みに失敗しました。",
+                    error
+                );
+
+                statusElement.textContent =
+                    "GLBモデルを読み込めませんでした。"
+                    + " ファイル名とフォルダ構成を確認してください。";
+
+                statusElement.style.background =
+                    "rgba(150, 0, 0, 0.85)";
+            }
+        );
+
+
+        // =========================================================
+        // カメラ自動調整
+        // =========================================================
+
+        function fitCameraToModel(
+            model,
+            targetCamera,
+            targetControls
+        ) {
+            const box = new THREE.Box3().setFromObject(model);
+
+            if (box.isEmpty()) {
+                console.warn(
+                    "モデルの大きさを取得できませんでした。"
+                );
+
+                return;
+            }
+
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+
+            box.getSize(size);
+            box.getCenter(center);
+
+
+            const maxSize = Math.max(
+                size.x,
+                size.y,
+                size.z
+            );
+
+            const halfFov =
+                THREE.MathUtils.degToRad(
+                    targetCamera.fov * 0.5
+                );
+
+            let distance =
+                (maxSize * 0.5) / Math.tan(halfFov);
+
+            // 少し余白を持たせる
+            distance *= 1.5;
+
+
+            const direction = new THREE.Vector3(
+                1,
+                0.7,
+                1
+            ).normalize();
+
+
+            targetCamera.position.copy(
+                center.clone().add(
+                    direction.multiplyScalar(distance)
+                )
+            );
+
+
+            targetCamera.near =
+                Math.max(maxSize / 1000, 0.001);
+
+            targetCamera.far =
+                Math.max(maxSize * 1000, 1000);
+
+            targetCamera.updateProjectionMatrix();
+
+
+            targetControls.target.copy(center);
+
+            targetControls.minDistance =
+                Math.max(maxSize * 0.01, 0.001);
+
+            targetControls.maxDistance =
+                Math.max(maxSize * 100, 100);
+
+            targetControls.update();
+
+
+            // グリッドをモデル下端に移動
+            gridHelper.position.y = box.min.y;
+
+            const gridSize = Math.max(maxSize * 4, 10);
+
+            gridHelper.scale.set(
+                gridSize / 20,
+                gridSize / 20,
+                gridSize / 20
+            );
+        }
+
+
+        // =========================================================
+        // ウィンドウサイズ変更
+        // =========================================================
+
+        window.addEventListener(
+            "resize",
+            function () {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+
+                renderer.setSize(width, height);
+
+                renderer.setPixelRatio(
+                    Math.min(window.devicePixelRatio, 2)
+                );
+            }
+        );
+
+
+        // =========================================================
+        // 描画ループ
+        // =========================================================
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const deltaTime = clock.getDelta();
+
+            if (animationMixer) {
+                animationMixer.update(deltaTime);
+            }
+
+            controls.update();
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
