@@ -80,3 +80,21 @@ function parseRail(text){
             };
         });
 }
+
+document.addEventListener('paste',e=>{
+    const items=e.clipboardData?.items;
+    if(!items)return;
+
+    for(const item of items){
+        if(item.type.startsWith('image/')){
+            const file=item.getAsFile();
+
+            if(file){
+                loadImageFile(file,'貼り付け画像.png');
+                status.textContent='貼り付けた画像を読み込みました';
+                e.preventDefault();
+                return;
+            }
+        }
+    }
+});
