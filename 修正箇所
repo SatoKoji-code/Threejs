@@ -32,3 +32,51 @@ pixels=sourceCtx.getImageData(
     sourceCanvas.width,
     sourceCanvas.height
 ).data
+
+function parseRail(text){
+    return text.split(/\r?\n/)
+        .map(s=>s.trim())
+        .filter(Boolean)
+        .map((line,i)=>{
+
+            // ReCap形式
+            // 例：
+            // x 32.023m y 6.101m z 45.560m
+            // X -32.023m Y 6.101m Z 45.560m
+            // x=32.023m y=6.101m z=45.560m
+            const recap=line.match(
+                /x\s*[=:]?\s*(-?\d+(?:\.\d+)?)\s*m\s*y\s*[=:]?\s*(-?\d+(?:\.\d+)?)\s*m\s*z\s*[=:]?\s*(-?\d+(?:\.\d+)?)\s*m/i
+            );
+
+            if(recap){
+                return{
+                    x:Number(recap[1]),
+                    y:Number(recap[2]),
+                    z:Number(recap[3])
+                };
+            }
+
+            // 従来形式も引き続き対応
+            // 32.023,6.101,45.560
+            // 32.023 6.101 45.560
+            // 32.023;6.101;45.560
+            const a=line
+                .split(/[\s,;]+/)
+                .map(Number);
+
+            if(
+                a.length<3 ||
+                a.slice(0,3).some(v=>!Number.isFinite(v))
+            ){
+                throw Error(
+                    `${i+1}行目の座標が不正です：${line}`
+                );
+            }
+
+            return{
+                x:a[0],
+                y:a[1],
+                z:a[2]
+            };
+        });
+}
