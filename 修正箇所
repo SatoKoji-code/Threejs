@@ -1,0 +1,34 @@
+const $=id=>document.getElementById(id),
+      canvas=$('canvas'),
+      ctx=canvas.getContext('2d',{willReadFrequently:true}),
+      status=$('status'),
+      pcanvas=$('previewcanvas'),
+      pctx=pcanvas.getContext('2d');
+
+/* PTS色情報取得専用Canvas */
+const sourceCanvas=document.createElement('canvas');
+const sourceCtx=sourceCanvas.getContext('2d',{willReadFrequently:true});
+
+
+im.onload=()=>{
+    img=im;
+    fileName=f.name;
+
+    canvas.width=im.naturalWidth;
+    canvas.height=im.naturalHeight;
+
+    /* 元画像専用Canvasにも保存 */
+    sourceCanvas.width=im.naturalWidth;
+    sourceCanvas.height=im.naturalHeight;
+    sourceCtx.clearRect(0,0,sourceCanvas.width,sourceCanvas.height);
+    sourceCtx.drawImage(im,0,0);
+
+    p2=[];
+
+
+pixels=sourceCtx.getImageData(
+    0,
+    0,
+    sourceCanvas.width,
+    sourceCanvas.height
+).data
